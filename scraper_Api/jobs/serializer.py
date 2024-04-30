@@ -8,7 +8,8 @@ import time
 class JobAddSerializer(serializers.ModelSerializer):
     job_id = serializers.SerializerMethodField()
     company_name = serializers.SerializerMethodField()
-
+    remote = serializers.ChoiceField(choices=[('remote', 'remote'), ('on-site', 'on-site'), ('hybrid', 'hybrid')])
+    
     class Meta:
         model = Job
         fields = ['job_link', 'job_title', 'company', 'country',
