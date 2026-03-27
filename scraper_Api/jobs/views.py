@@ -117,13 +117,20 @@ class AddScraperJobs(APIView, JobView):
                 job_serializer.save()
                 posted_jobs.append(job_serializer.data)
 
-        current_date = datetime.now()
-        jobs_count = Job.objects.filter(company=company_instance).count()
+        current_date = datetime.now().date()
+        new_jobs_count = len(posted_jobs)
+        existing_data_set = DataSet.objects.filter(
+            company=company_instance, date=current_date).first()
+
+        if existing_data_set:
+            new_data = existing_data_set.data + new_jobs_count
+        else:
+            new_data = new_jobs_count
 
         DataSet.objects.update_or_create(
             company=company_instance,
             date=current_date,
-            defaults={"data": jobs_count},
+            defaults={"data": new_data},
         )
 
         return Response(posted_jobs)
@@ -145,6 +152,56 @@ class AddScraperJobs(APIView, JobView):
 
             for job in to_delete:
                 Job.objects.filter(job_link=job).first().delete()
+
+
+class AddJobs(APIView, JobView):
+    def post(self, request):
+        jobs = self.transformed_jobs(request.data)
+
+        if not jobs:
+            return Response(status=400)
+
+        company_name = self.transform_data(jobs[0].get("company")).title()
+        company_obj = {"company": company_name}
+        company_serializer = CompanySerializer(data=company_obj)
+        company_serializer.is_valid(raise_exception=True)
+        company_instance = company_serializer.save()
+
+        user = request.user
+        user.company.add(company_instance)
+
+        posted_jobs = []
+
+        for job in jobs:
+            job["company"] = company_instance.id
+
+            job_link = self.transform_data(job.get("job_link"))
+
+            if not Job.objects.filter(job_link=job_link).exists():
+                job_serializer = JobAddSerializer(
+                    data=job, context={"request": request}
+                )
+                job_serializer.is_valid(raise_exception=True)
+                job_serializer.save()
+                posted_jobs.append(job_serializer.data)
+
+        current_date = datetime.now().date()
+        new_jobs_count = len(posted_jobs)
+        existing_data_set = DataSet.objects.filter(
+            company=company_instance, date=current_date).first()
+
+        if existing_data_set:
+            new_data = existing_data_set.data + new_jobs_count
+        else:
+            new_data = new_jobs_count
+
+        DataSet.objects.update_or_create(
+            company=company_instance,
+            date=current_date,
+            defaults={"data": new_data},
+        )
+
+        return Response(posted_jobs)
 
 
 class GetJobData(APIView):
@@ -242,7 +299,8 @@ class DeleteJob(APIView, JobView):
                 company = request.user.company.get(
                     id=self.transform_data(job.get("companyId")).title())
                 job_link = self.transform_data(job.get("job_link"))
-                job_obj = Job.objects.get(job_link=job_link, company=company.id)
+                job_obj = Job.objects.get(
+                    job_link=job_link, company=company.id)
 
                 if not job_obj:
                     return Response(JOB_NOT_FOUND)
@@ -258,6 +316,3 @@ class PublishJob(APIView, JobView):
     def post(self, request):
         response = self.update(request.data, "published")
         return response
-
-
-
