@@ -22,6 +22,7 @@ PUBLISH_JOB_ID = "publish_pending_jobs"
 CLEAN_JOB_ID = "clean_job"
 JOB_LINK_TIMEOUT = 5
 MAX_PUBLISH_WORKERS = 5
+INACTIVE_COMPANY_DAYS = 2
 
 
 def unpublish_jobs(company):
@@ -53,6 +54,21 @@ def is_job_link_available(job_link):
     except requests.RequestException as exc:
         logging.warning("Link indisponibil pentru %s: %s", job_link, exc)
         return False
+
+
+def get_last_company_dataset(company):
+    return DataSet.objects.filter(company=company).order_by("-date").first()
+
+
+def is_company_inactive(company, today=None):
+    if today is None:
+        today = datetime.now().date()
+
+    last_data = get_last_company_dataset(company)
+    if not last_data:
+        return True, None
+
+    return (today - last_data.date).days >= INACTIVE_COMPANY_DAYS, last_data.date
 
 
 def publish_company_jobs(company):
@@ -90,17 +106,34 @@ def publish_company_jobs(company):
 
 def publish_pending_jobs():
     logging.info("Jobul publish_pending_jobs() a inceput!")
+    today = datetime.now().date()
     companies = Company.objects.filter(jobs__published=False).distinct()
 
     if not companies.exists():
         logging.info("Nu exista companii cu joburi nepublicate.")
         return
 
+    active_companies = []
+    for company in companies:
+        is_inactive, last_dataset_date = is_company_inactive(company, today=today)
+        if is_inactive:
+            logging.info(
+                "Compania %s este inactiva (ultimul dataset: %s), joburile nu vor fi publicate",
+                company.company,
+                last_dataset_date,
+            )
+            continue
+        active_companies.append(company)
+
+    if not active_companies:
+        logging.info("Nu exista companii active cu joburi nepublicate.")
+        return
+
     total_published = 0
     with ThreadPoolExecutor(max_workers=MAX_PUBLISH_WORKERS) as executor:
         futures = {
             executor.submit(publish_company_jobs, company): company.company
-            for company in companies
+            for company in active_companies
         }
 
         for future in as_completed(futures):
@@ -128,9 +161,8 @@ def clean():
         if not company:
             continue
 
-        last_data = DataSet.objects.filter(company=company).last()
-
-        if not last_data or (today - last_data.date).days >= 2:
+        is_inactive, _ = is_company_inactive(company, today=today)
+        if is_inactive:
             if company.source:
                 company.delete()
                 logging.info(f"Compania {company.company} a fost ștearsă.")
