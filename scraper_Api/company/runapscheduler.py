@@ -20,9 +20,11 @@ scheduler = BackgroundScheduler(timezone="Europe/Bucharest")
 scheduler.add_jobstore(DjangoJobStore(), "default")
 PUBLISH_JOB_ID = "publish_pending_jobs"
 CLEAN_JOB_ID = "clean_job"
+MONTHLY_DELETE_JOB_ID = "delete_monthly_stale_companies"
 JOB_LINK_TIMEOUT = 5
 MAX_PUBLISH_WORKERS = 5
 INACTIVE_COMPANY_DAYS = 2
+MONTHLY_DELETE_COMPANY_DAYS = 30
 
 
 def unpublish_jobs(company):
@@ -60,7 +62,7 @@ def get_last_company_dataset(company):
     return DataSet.objects.filter(company=company).order_by("-date").first()
 
 
-def is_company_inactive(company, today=None):
+def is_company_stale(company, inactive_days, today=None):
     if today is None:
         today = datetime.now().date()
 
@@ -68,7 +70,11 @@ def is_company_inactive(company, today=None):
     if not last_data:
         return True, None
 
-    return (today - last_data.date).days >= INACTIVE_COMPANY_DAYS, last_data.date
+    return (today - last_data.date).days >= inactive_days, last_data.date
+
+
+def is_company_inactive(company, today=None):
+    return is_company_stale(company, INACTIVE_COMPANY_DAYS, today=today)
 
 
 def publish_company_jobs(company):
@@ -174,42 +180,79 @@ def clean():
     logging.info("Jobul clean() s-a încheiat cu succes!")
 
 
+def delete_monthly_stale_companies():
+    """Șterge companiile care nu au mai adus joburi de 30 de zile."""
+    logging.info("Jobul delete_monthly_stale_companies() a început!")
+    today = datetime.now().date()
+    deleted_companies = 0
+
+    for company in Company.objects.all().iterator():
+        is_stale, last_dataset_date = is_company_stale(
+            company,
+            MONTHLY_DELETE_COMPANY_DAYS,
+            today=today,
+        )
+        if not is_stale:
+            continue
+
+        company_name = company.company
+        company.delete()
+        deleted_companies += 1
+        logging.info(
+            "Compania %s a fost ștearsă de jobul lunar (ultimul dataset: %s)",
+            company_name,
+            last_dataset_date,
+        )
+
+    logging.info(
+        "Jobul delete_monthly_stale_companies() s-a încheiat. Companii șterse: %s",
+        deleted_companies,
+    )
+
+
 def start():
     """Pornește APScheduler și adaugă joburile dacă nu există."""
     global scheduler
 
-    # -------------------------
-    # Job zilnic: clean()
-    # -------------------------
-    if not DjangoJob.objects.filter(id=CLEAN_JOB_ID).exists():
-        logging.info("Jobul 'clean_job' nu există, îl programăm...")
-        scheduler.add_job(
-            clean,
-            trigger="interval",
-            days=1,  # Rulează zilnic
-            id=CLEAN_JOB_ID,
-            jobstore="default",
-            replace_existing=True,
-            max_instances=1,
-            misfire_grace_time=300,
-        )
-    else:
-        logging.info("Jobul 'clean_job' există deja.")
+    logging.info("Programăm jobul 'clean_job' la 01:00 zilnic.")
+    scheduler.add_job(
+        clean,
+        trigger="cron",
+        hour=1,
+        minute=0,
+        id=CLEAN_JOB_ID,
+        jobstore="default",
+        replace_existing=True,
+        max_instances=1,
+        misfire_grace_time=300,
+    )
 
-    if not DjangoJob.objects.filter(id=PUBLISH_JOB_ID).exists():
-        logging.info("Jobul 'publish_pending_jobs' nu exista, il programam...")
-        scheduler.add_job(
-            publish_pending_jobs,
-            trigger="interval",
-            days=1,  # Rulează zilnic
-            id=PUBLISH_JOB_ID,
-            jobstore="default",
-            replace_existing=True,
-            max_instances=1,
-            misfire_grace_time=300,
-        )
-    else:
-        logging.info("Jobul 'publish_pending_jobs' exista deja.")
+    logging.info("Programăm jobul 'publish_pending_jobs' la 03:00 zilnic.")
+    scheduler.add_job(
+        publish_pending_jobs,
+        trigger="cron",
+        hour=3,
+        minute=0,
+        id=PUBLISH_JOB_ID,
+        jobstore="default",
+        replace_existing=True,
+        max_instances=1,
+        misfire_grace_time=300,
+    )
+
+    logging.info("Programăm jobul 'delete_monthly_stale_companies' la 05:00 în prima zi a lunii.")
+    scheduler.add_job(
+        delete_monthly_stale_companies,
+        trigger="cron",
+        day=1,
+        hour=5,
+        minute=0,
+        id=MONTHLY_DELETE_JOB_ID,
+        jobstore="default",
+        replace_existing=True,
+        max_instances=1,
+        misfire_grace_time=300,
+    )
 
     # Pornește schedulerul dacă nu e deja activ
     if not scheduler.running:
