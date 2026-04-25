@@ -4,7 +4,6 @@ import time
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import requests
 from apscheduler.schedulers.background import BackgroundScheduler
 from django_apscheduler.jobstores import DjangoJobStore, register_events
 from django_apscheduler.models import DjangoJob
@@ -21,7 +20,6 @@ scheduler.add_jobstore(DjangoJobStore(), "default")
 PUBLISH_JOB_ID = "publish_pending_jobs"
 CLEAN_JOB_ID = "clean_job"
 MONTHLY_DELETE_JOB_ID = "delete_monthly_stale_companies"
-JOB_LINK_TIMEOUT = 5
 MAX_PUBLISH_WORKERS = 5
 INACTIVE_COMPANY_DAYS = 2
 MONTHLY_DELETE_COMPANY_DAYS = 30
@@ -40,22 +38,6 @@ def has_valid_location(job):
     has_remote = "remote" in remote_value
     has_locality = bool(job.city and job.county)
     return has_remote or has_locality
-
-
-def is_job_link_available(job_link):
-    if not job_link:
-        return False
-
-    try:
-        response = requests.head(
-            job_link,
-            timeout=JOB_LINK_TIMEOUT,
-            allow_redirects=True,
-        )
-        return response.ok
-    except requests.RequestException as exc:
-        logging.warning("Link indisponibil pentru %s: %s", job_link, exc)
-        return False
 
 
 def get_last_company_dataset(company):
@@ -83,14 +65,6 @@ def publish_company_jobs(company):
     published_count = 0
 
     for job in jobs.iterator():
-        if not is_job_link_available(job.job_link):
-            logging.info(
-                "Jobul %s de la %s nu este disponibil",
-                job.job_title,
-                company.company,
-            )
-            continue
-
         if not has_valid_location(job):
             logging.info(
                 "Jobul %s de la %s nu are locatie valida",
