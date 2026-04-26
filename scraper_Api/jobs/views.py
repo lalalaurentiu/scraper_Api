@@ -154,19 +154,19 @@ class AddScraperJobs(APIView, JobView):
     def delete(self):
         scraper_data = self.transformed_jobs(self.request.data)
         if isinstance(scraper_data, list) and len(scraper_data) > 0:
-            company_obj = Company.objects.filter(
-                company=self.transform_data(scraper_data[0].get("company"))
-            ).first()
-            database_jobs = Job.objects.filter(company=company_obj.id).values()
-            scraper_data = [
+            company_obj = self.resolve_company_instance(scraper_data[0], self.request)
+            database_jobs = list(
+                Job.objects.filter(company=company_obj.id).values_list("job_link", flat=True)
+            )
+            scraper_job_links = {
                 self.transform_data(job.get("job_link")) for job in scraper_data
-            ]
-            database_jobs = [job.get("job_link") for job in database_jobs]
+            }
             to_delete = [
-                job for job in database_jobs if job not in scraper_data]
+                job_link for job_link in database_jobs if job_link not in scraper_job_links
+            ]
 
-            for job in to_delete:
-                Job.objects.filter(job_link=job).first().delete()
+            for job_link in to_delete:
+                Job.objects.filter(job_link=job_link, company=company_obj).delete()
 
 
 class AddJobs(APIView, JobView):
