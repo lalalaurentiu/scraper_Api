@@ -22,6 +22,41 @@ JOB_NOT_FOUND = {"message": "Job not found"}
 
 
 class JobView(object):
+    def resolve_company_instance(self, job, request):
+        company_name = self.transform_data(job.get("company")).title()
+        company_obj = {"company": company_name}
+
+        if job.get("source"):
+            company_obj["source"] = job.get("source")
+
+        company_serializer = CompanySerializer(data=company_obj)
+        company_serializer.is_valid(raise_exception=True)
+        company_instance = company_serializer.save()
+
+        request.user.company.add(company_instance)
+        return company_instance
+
+    def update_company_datasets(self, company_job_counts):
+        current_date = datetime.now().date()
+
+        for company_id, payload in company_job_counts.items():
+            company_instance = payload["company"]
+            new_jobs_count = payload["count"]
+            existing_data_set = DataSet.objects.filter(
+                company=company_instance, date=current_date
+            ).first()
+
+            if existing_data_set:
+                new_data = existing_data_set.data + new_jobs_count
+            else:
+                new_data = new_jobs_count
+
+            DataSet.objects.update_or_create(
+                company=company_instance,
+                date=current_date,
+                defaults={"data": new_data},
+            )
+
     def update(self, jobs, attribute):
         if isinstance(jobs, list) and len(jobs) > 0 and hasattr(Job, attribute):
             for job in jobs:
@@ -89,49 +124,29 @@ class AddScraperJobs(APIView, JobView):
             return Response(status=400)
 
         posted_jobs = []
-
-        first_job = jobs[0]
-        company_name = self.transform_data(first_job.get("company")).title()
-
-        company_obj = {"company": company_name}
-        if first_job.get("source"):
-            company_obj["source"] = first_job.get("source")
-
-        company_serializer = CompanySerializer(data=company_obj)
-        company_serializer.is_valid(raise_exception=True)
-        company_instance = company_serializer.save()
-
-        user = request.user
-        user.company.add(company_instance)
+        company_job_counts = {}
 
         for job in jobs:
+            company_instance = self.resolve_company_instance(job, request)
             job["company"] = company_instance.id
 
             job_link = self.transform_data(job.get("job_link"))
 
-            if not Job.objects.filter(job_link=job_link).exists():
+            if not Job.objects.filter(job_link=job_link, company=company_instance).exists():
                 job_serializer = JobAddSerializer(
                     data=job, context={"request": request}
                 )
                 job_serializer.is_valid(raise_exception=True)
                 job_serializer.save()
                 posted_jobs.append(job_serializer.data)
+                if company_instance.id not in company_job_counts:
+                    company_job_counts[company_instance.id] = {
+                        "company": company_instance,
+                        "count": 0,
+                    }
+                company_job_counts[company_instance.id]["count"] += 1
 
-        current_date = datetime.now().date()
-        new_jobs_count = len(posted_jobs)
-        existing_data_set = DataSet.objects.filter(
-            company=company_instance, date=current_date).first()
-
-        if existing_data_set:
-            new_data = existing_data_set.data + new_jobs_count
-        else:
-            new_data = new_jobs_count
-
-        DataSet.objects.update_or_create(
-            company=company_instance,
-            date=current_date,
-            defaults={"data": new_data},
-        )
+        self.update_company_datasets(company_job_counts)
 
         return Response(posted_jobs)
 
@@ -161,45 +176,30 @@ class AddJobs(APIView, JobView):
         if not jobs:
             return Response(status=400)
 
-        company_name = self.transform_data(jobs[0].get("company")).title()
-        company_obj = {"company": company_name}
-        company_serializer = CompanySerializer(data=company_obj)
-        company_serializer.is_valid(raise_exception=True)
-        company_instance = company_serializer.save()
-
-        user = request.user
-        user.company.add(company_instance)
-
         posted_jobs = []
+        company_job_counts = {}
 
         for job in jobs:
+            company_instance = self.resolve_company_instance(job, request)
             job["company"] = company_instance.id
 
             job_link = self.transform_data(job.get("job_link"))
 
-            if not Job.objects.filter(job_link=job_link).exists():
+            if not Job.objects.filter(job_link=job_link, company=company_instance).exists():
                 job_serializer = JobAddSerializer(
                     data=job, context={"request": request}
                 )
                 job_serializer.is_valid(raise_exception=True)
                 job_serializer.save()
                 posted_jobs.append(job_serializer.data)
+                if company_instance.id not in company_job_counts:
+                    company_job_counts[company_instance.id] = {
+                        "company": company_instance,
+                        "count": 0,
+                    }
+                company_job_counts[company_instance.id]["count"] += 1
 
-        current_date = datetime.now().date()
-        new_jobs_count = len(posted_jobs)
-        existing_data_set = DataSet.objects.filter(
-            company=company_instance, date=current_date).first()
-
-        if existing_data_set:
-            new_data = existing_data_set.data + new_jobs_count
-        else:
-            new_data = new_jobs_count
-
-        DataSet.objects.update_or_create(
-            company=company_instance,
-            date=current_date,
-            defaults={"data": new_data},
-        )
+        self.update_company_datasets(company_job_counts)
 
         return Response(posted_jobs)
 
