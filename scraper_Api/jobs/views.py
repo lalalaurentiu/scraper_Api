@@ -57,6 +57,14 @@ class JobView(object):
                 defaults={"data": new_data},
             )
 
+    def touch_company_dataset(self, company_instance):
+        current_date = datetime.now().date()
+        DataSet.objects.get_or_create(
+            company=company_instance,
+            date=current_date,
+            defaults={"data": 0},
+        )
+
     def update(self, jobs, attribute):
         if isinstance(jobs, list) and len(jobs) > 0 and hasattr(Job, attribute):
             for job in jobs:
@@ -128,6 +136,7 @@ class AddScraperJobs(APIView, JobView):
 
         for job in jobs:
             company_instance = self.resolve_company_instance(job, request)
+            self.touch_company_dataset(company_instance)
             job["company"] = company_instance.id
 
             job_link = self.transform_data(job.get("job_link"))
@@ -181,6 +190,7 @@ class AddJobs(APIView, JobView):
 
         for job in jobs:
             company_instance = self.resolve_company_instance(job, request)
+            self.touch_company_dataset(company_instance)
             job["company"] = company_instance.id
 
             job_link = self.transform_data(job.get("job_link"))
