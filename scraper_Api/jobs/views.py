@@ -1,12 +1,16 @@
 
 from django.shortcuts import get_object_or_404
+from uuid import uuid4
+from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from datetime import datetime
+import os
 
 from .constants import JOB_SORT_OPTIONS
 
-from .models import Job
+from .models import Job, JOB_ORIGIN_MANUAL
 from company.models import Company, DataSet, Source
 from utils.pagination import CustomPagination
 from .serializer import (
@@ -22,6 +26,35 @@ JOB_NOT_FOUND = {"message": "Job not found"}
 
 
 class JobView(object):
+    def build_manual_job_link(self, company_instance, job_id=None):
+        if job_id:
+            frontend_url = (os.getenv("FRONTEND_URL") or "").rstrip("/")
+            job_path = f"/job/{job_id}"
+            return f"{frontend_url}{job_path}" if frontend_url else job_path
+
+        return f"manual-temp://company/{company_instance.id}/job/{uuid4()}"
+
+    def parse_expires_at(self, value):
+        if not value:
+            return None
+
+        expires_at = parse_datetime(value)
+        if expires_at is None:
+            return False
+
+        if timezone.is_naive(expires_at):
+            expires_at = timezone.make_aware(expires_at, timezone.get_current_timezone())
+
+        return expires_at
+
+    def resolve_user_company_instance(self, job, request):
+        company_id = job.get("companyId")
+        if company_id:
+            return request.user.company.filter(id=company_id).first()
+
+        company_name = self.transform_data(job.get("company")).title()
+        return request.user.company.filter(company=company_name).first()
+
     def resolve_company_instance(self, job, request):
         company_name = self.transform_data(job.get("company")).title()
         company_obj = {"company": company_name}
@@ -91,6 +124,7 @@ class JobView(object):
                     "id": job.get("id"),
                     "job_link": self.transform_data(job.get("job_link")),
                     "job_title": self.transform_data(job.get("job_title")),
+                    "description": self.transform_data(job.get("description")),
                     "country": self.transform_data(job.get("country")),
                     "city": self.transform_data(job.get("city")),
                     "county": self.transform_data(job.get("county")),
@@ -101,6 +135,7 @@ class JobView(object):
                     "remote": self.transform_data(job.get("remote")),
                     "company": self.transform_data(job.get("company")).title(),
                     "companyId": job.get("companyId"),
+                    "expires_at": job.get("expires_at"),
                 }
 
                 if source:
@@ -214,6 +249,58 @@ class AddJobs(APIView, JobView):
         return Response(posted_jobs)
 
 
+class AddManualJobs(APIView, JobView):
+    def post(self, request):
+        jobs = self.transformed_jobs(request.data)
+
+        if not jobs:
+            return Response(status=400)
+
+        posted_jobs = []
+        company_job_counts = {}
+
+        for job in jobs:
+            company_instance = self.resolve_user_company_instance(job, request)
+            if not company_instance:
+                return Response(status=401)
+
+            self.touch_company_dataset(company_instance)
+            job["company"] = company_instance.id
+            job["job_link"] = self.build_manual_job_link(company_instance)
+            expires_at = self.parse_expires_at(job.get("expires_at"))
+
+            if job.get("expires_at") and expires_at is False:
+                return Response({"expires_at": ["Invalid datetime format"]}, status=400)
+
+            job.pop("expires_at", None)
+
+            job_link = self.transform_data(job.get("job_link"))
+
+            if not Job.objects.filter(job_link=job_link, company=company_instance).exists():
+                job_serializer = JobAddSerializer(
+                    data=job, context={"request": request}
+                )
+                job_serializer.is_valid(raise_exception=True)
+                job_instance = job_serializer.save(
+                    origin=JOB_ORIGIN_MANUAL,
+                    created_by=request.user,
+                    expires_at=expires_at,
+                )
+                job_instance.job_link = self.build_manual_job_link(company_instance, job_instance.id)
+                job_instance.save(update_fields=["job_link"])
+                posted_jobs.append(JobAddSerializer(job_instance).data)
+                if company_instance.id not in company_job_counts:
+                    company_job_counts[company_instance.id] = {
+                        "company": company_instance,
+                        "count": 0,
+                    }
+                company_job_counts[company_instance.id]["count"] += 1
+
+        self.update_company_datasets(company_job_counts)
+
+        return Response(posted_jobs)
+
+
 class GetJobData(APIView):
     serializer_class = GetJobSerializer
     pagination_class = CustomPagination
@@ -274,6 +361,26 @@ class GetJobData(APIView):
             return paginator.get_paginated_response(jobs)
         else:
             return Response(status=401)
+
+
+class GetJobDetail(APIView):
+    serializer_class = GetJobSerializer
+
+    def get(self, request, id):
+        job = Job.objects.filter(id=id).select_related("company").first()
+        if not job:
+            return Response(status=404)
+
+        if not request.user.company.filter(id=job.company_id).exists():
+            return Response(status=401)
+
+        serialized_job = self.serializer_class(job).data
+        serialized_job["company"] = job.company.company
+        serialized_job["country"] = [] if not serialized_job["country"] else serialized_job["country"].split(",")
+        serialized_job["city"] = [] if not serialized_job["city"] else serialized_job["city"].split(",")
+        serialized_job["county"] = [] if not serialized_job["county"] else serialized_job["county"].split(",")
+
+        return Response(serialized_job)
 
 
 class EditJob(APIView, JobView):

@@ -61,6 +61,19 @@ class GetJobView(APIView):
         serializer = self.serializer_class(result_page, many=True)
         return paginator.get_paginated_response(serializer.data)
 
+
+@permission_classes([AllowAny])
+class GetJobDetailView(APIView):
+    serializer_class = JobSerializer
+
+    def get(self, _, id):
+        job = Job.objects.filter(id=id, published=True).select_related("company", "company__source").first()
+        if not job:
+            return Response(status=status.HTTP_404_NOT_FOUND)
+
+        serializer = self.serializer_class(job)
+        return Response(serializer.data)
+
 @permission_classes([AllowAny])
 class GetCompanies(APIView):
     serializer_class = CompanySerializer

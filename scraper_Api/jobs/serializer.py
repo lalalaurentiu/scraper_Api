@@ -11,7 +11,7 @@ class JobAddSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Job
-        fields = ['job_link', 'job_title', 'company', 'country',
+        fields = ['job_link', 'job_title', 'description', 'company', 'country',
                   'city', 'county', 'salary', 'salary_min', 'salary_max', 'salary_currency', 'remote', 'job_id', 'company_name']
 
     def validate(self, attrs):
@@ -98,7 +98,7 @@ class GetJobSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Job
-        fields = ['id','job_link', 'job_title', 'company', 'country', 'city',
+        fields = ['id','job_link', 'job_title', 'description', 'company', 'country', 'city',
                   'county', 'salary_min', 'salary_max', 'salary_currency', 'remote', 'edited', 'published', 'posted', 'company_name']
 
     def get_company_name(self, obj):

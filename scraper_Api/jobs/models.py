@@ -1,7 +1,16 @@
+from django.conf import settings
 from rest_framework.response import Response
 from company.models import Company
 from django.db import models
 import hashlib
+
+
+JOB_ORIGIN_SCRAPER = "scraper"
+JOB_ORIGIN_MANUAL = "manual"
+JOB_ORIGIN_CHOICES = [
+    (JOB_ORIGIN_SCRAPER, "scraper"),
+    (JOB_ORIGIN_MANUAL, "manual"),
+]
 
 class Job(models.Model):
     company = models.ForeignKey(
@@ -12,12 +21,24 @@ class Job(models.Model):
     county = models.TextField(blank=True)
     job_link = models.CharField(max_length=1000)
     job_title = models.TextField()
+    description = models.TextField(blank=True, default="")
     salary_min = models.IntegerField(blank=True, null=True)
     salary_max = models.IntegerField(blank=True, null=True)
     salary_currency = models.CharField(max_length=10, blank=True, null=True)
     remote = models.CharField(max_length=50, blank=True)
     edited = models.BooleanField(default=False)
     published = models.BooleanField(default=False)
+    origin = models.CharField(max_length=20, choices=JOB_ORIGIN_CHOICES, default=JOB_ORIGIN_SCRAPER)
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_jobs",
+    )
+    expires_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True, null=True, blank=True)
     date = models.DateField(null=True, blank=True)
 
     def __str__(self):
