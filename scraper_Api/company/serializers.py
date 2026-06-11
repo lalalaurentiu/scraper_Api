@@ -19,7 +19,20 @@ class CompanySerializer(serializers.ModelSerializer):
                   'description', 'logo', 'source','jobsCount', 'published_jobs', 'have_access', 'source_name', 'source_logo']
 
     def create(self, validated_data):
-        instance = Company.objects.filter(**validated_data).first()
+        company_name = validated_data.get('company')
+        source = validated_data.get('source')
+
+        if source is not None:
+            instance = Company.objects.filter(
+                company=company_name,
+                source=source,
+            ).first()
+        else:
+            instance = Company.objects.filter(
+                company=company_name,
+                source__isnull=True,
+            ).first()
+
         if not instance:
             instance = Company.objects.create(**validated_data)
             superusers = CustomUser.objects.filter(is_superuser=True)
