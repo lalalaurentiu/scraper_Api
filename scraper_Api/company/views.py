@@ -106,7 +106,8 @@ class UpdateCompany(APIView):
 class DeleteCompany(APIView):
     def post(self, request):
         user = request.user
-        company_id = request.data.get("companyId")
+        company_name = request.data.get("company")
+        company_id = Company.objects.filter(company=company_name).first().id
 
         if not company_id:
             return Response(status=400)
