@@ -106,14 +106,24 @@ class UpdateCompany(APIView):
 class DeleteCompany(APIView):
     def post(self, request):
         user = request.user
+        company_id = request.data.get("companyId")
         company_name = request.data.get("company")
-        company_id = Company.objects.filter(company=company_name).first().id
 
-        if not company_id:
+        if company_id:
+            try:
+                company_id = int(company_id)
+            except (TypeError, ValueError):
+                return Response(status=400)
+            company = Company.objects.filter(id=company_id).first()
+        elif company_name:
+            company = Company.objects.filter(company=company_name).first()
+        else:
             return Response(status=400)
 
-        company = user.company.filter(id=company_id).first()
         if not company:
+            return Response(status=400)
+
+        if not user.is_superuser and not user.company.filter(id=company.id).exists():
             return Response(status=401)
 
         company.delete()
