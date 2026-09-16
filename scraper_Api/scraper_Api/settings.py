@@ -43,6 +43,7 @@ ALLOWED_HOSTS = [
     'api.laurentiumarian.ro',
     '192.168.0.156',
     '81.180.202.206',
+    'https://firme.peviitor.ro/'
 ]
 
 CSRF_TRUSTED_ORIGINS = [
@@ -67,6 +68,7 @@ CORS_ALLOWED_ORIGINS = (
     'https://admin.zira.ro',
     'https://inviitor.ro',
     'https://www.inviitor.ro',
+    'https://firme.peviitor.ro/'
 )
 CORS_ALLOWED_ORIGIN_REGEXES = [
     r'^https://[a-z0-9-]+\.netlify\.app$',
